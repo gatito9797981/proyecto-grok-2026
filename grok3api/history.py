@@ -4,7 +4,18 @@ from typing import Dict, List, Optional, Union
 from enum import Enum
 import base64
 from io import BytesIO
-import imghdr
+
+def get_image_type(data: bytes) -> str:
+    """Detect image type from magic bytes."""
+    if data.startswith(b'\x89PNG\r\n\x1a\n'):
+        return "png"
+    if data.startswith(b'\xff\xd8'):
+        return "jpeg"
+    if data.startswith(b'GIF87a') or data.startswith(b'GIF89a'):
+        return "gif"
+    if data.startswith(b'RIFF') and data[8:12] == b'WEBP':
+        return "webp"
+    return None # Regresar None si no se reconoce la firma
 
 from grok3api.logger import logger
 
@@ -177,9 +188,7 @@ def encode_image(image: Union[str, BytesIO]) -> Optional[tuple[str, str]]:
         else:
             raise ValueError("Изображение должно быть путем к файлу или объектом BytesIO")
 
-        image_type = imghdr.what(None, h=image_data)
-        if not image_type:
-            image_type = "jpeg"
+        image_type = get_image_type(image_data)
 
         base64_image = base64.b64encode(image_data).decode('utf-8')
         return base64_image, image_type

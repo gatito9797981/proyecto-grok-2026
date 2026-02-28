@@ -38,6 +38,9 @@
 ## 🌟 Features
 
 - 🚀 **Automatic cookie retrieval** via browser with Cloudflare bypass — no manual setup required!  
+- 🛡️ **Advanced Anti-detection**: Built-in fingerprint spoofing (Canvas noise, WebGL context, AudioContext, Screen resolution, and Timezone emulation).
+- 🧬 **Driver Pool**: Support for parallel requests using a thread-safe pool of independent Chrome instances.
+- 🎮 **Simplified UI**: Professional terminal chat that automatically connects to your browser's default model.
 - 🖼️ **Convenient retrieval of generated images** with the `save_to` method, enabling one-click saving.  
 - 🔧 **Flexible request customization**: model selection, image generation control, attachment support, and more.  
 - 📦 **Attachment support**: send files and images along with requests.  
@@ -195,6 +198,52 @@ Fields of the `GrokResponse` object:
 - **`newTitle`**: New chat title, if available (Optional[str]).  
 
 ### [📬 Detailed `GrokResponse` Class Description](docs/En/GrokResponse.md)
+
+---
+
+## 🚀 Recent Major Updates (Backup 2 Optimizations)
+
+We have implemented a series of high-level optimizations to make the API even more robust and stealthy:
+
+### 🧬 Architecture: Multi-instance Driver Pool
+- **`DriverPool` Support**: Switched from a single browser instance to a thread-safe pool.
+- **Concurrent Requests**: Multiple threads can now interact with Grok simultaneously without session collisions.
+- **Auto-Recovery**: Failed driver instances are automatically re-initialized before returning to the pool.
+
+### 🎨 UX/UI: Terminal Pro Experience
+- **Interactive Selectors**: Integrated `questionary` for smooth model selection using arrow keys (↑↓).
+- **One-Click Launch**: Added `RUN_CHAT.bat` for automatic Conda environment activation and chat startup.
+- **Rich Formatting**: Full support for `rich` library for aesthetic tables, panels, and live status updates.
+- **Python 3.13 Compatibility**: Fixed `imghdr` removal issue with custom byte-level detection.
+
+### 🛡️ Advanced Anti-detection Implementation
+- **Enhanced Canvas Noise**: Implemented bit-level XOR noise on image data for a truly unique fingerprint.
+- **WebGL 1 & 2 Spoofing**: Dual-context vendor and renderer mask (Intel Iris Engine) to prevent hardware identification.
+- **AudioContext Fingerprinting**: Added randomized noise to AudioBuffer channel data.
+- **Screen & Timezone Emulation**: Fixed resolution to 1920x1080 and Timezone to 'America/New_York' for consistency.
+- **Realistic Plugins**: Emulated real Chrome PDF and Native Client plugins to pass advanced bot detection tests.
+
+---
+
+## 🚀 xAI Updates — February 2026 (Major Fixes)
+
+We have integrated significant architectural improvements and critical bug fixes to ensure 100% compatibility with the latest Grok 4.x/3.x updates:
+
+### 🛠️ Core Client Refactoring
+- **Modular `ask()`**: The main request method has been split into 5 atomic sub-methods (`_build_headers`, `_prepare_attachments`, `_build_payload`, `_execute_with_retry`, `_process_response`) for maximum stability and easier debugging.
+- **FIX #1: History Logic**: Resolved the critical bug where the assistant would incorrectly save the user's prompt as its own response.
+- **FIX #2: Deepsearch Key**: Fixed the typo `deepsearch preset` → `deepsearch_preset` that prevented Deep Search from working.
+- **Internal Retries**: Implemented a robust `_execute_with_retry` layer that handles rate limits, Cloudflare "Just a moment" screens, and automatic session restarts.
+
+### 🌐 Dynamic Configuration (.env)
+You can now control the infrastructure without touching the code. Add these to your `.env`:
+- `DEF_PROXY`: Set your custom SOCKS/HTTP proxy globally.
+- `DRIVER_POOL_SIZE`: Adjust the number of parallel Chrome instances.
+
+### 🎭 Terminal Chat Pro
+- **Automatic History**: The chat now displays previous turns automatically for better context.
+- **Saturation Recovery**: Built-in 3-tier retry logic (5s wait) specifically for "Grok is under heavy usage" errors.
+- **SIGTERM Support**: Clean exit handling for server environments.
 
 ---
 
