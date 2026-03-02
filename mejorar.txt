@@ -1,0 +1,138 @@
+Mejoras Específicas                                                                                                                                                      │
+│                                                                                                                                                                          │
+│ 1. Canvas Fingerprint Mejorado                                                                                                                                           │
+│                                                                                                                                                                          │
+│ // ANTES: Solo 1 pixel con XOR                                                                                                                                           │
+│ img.data[0] = img.data[0] ^ 1;                                                                                                                                           │
+│                                                                                                                                                                          │
+│ // DESPUÉS: Ruido distribuido con seed consistente                                                                                                                       │
+│ const seed = {canvas_seed};                                                                                                                                              │
+│ const noise = [];                                                                                                                                                        │
+│ for (let i = 0; i < 256; i++) {                                                                                                                                          │
+│     noise[i] = ((seed * (i + 1) * 1103515245 + 12345) & 0x7fff) % 3 - 1;                                                                                                 │
+│ }                                                                                                                                                                        │
+│ for (let i = 0; i < data.length; i += 4) {                                                                                                                               │
+│     const idx = (i / 4) % 256;                                                                                                                                           │
+│     data[i] = Math.max(0, Math.min(255, data[i] + noise[idx]));                                                                                                          │
+│     data[i+1] = Math.max(0, Math.min(255, data[i+1] + noise[(idx + 85) % 256]));                                                                                         │
+│     data[i+2] = Math.max(0, Math.min(255, data[i+2] + noise[(idx + 170) % 256]));                                                                                        │
+│ }                                                                                                                                                                        │
+│                                                                                                                                                                          │
+│ 2. WebGL Spoofing Completo                                                                                                                                               │
+│                                                                                                                                                                          │
+│ // Parámetros adicionales                                                                                                                                                │
+│ const WEBGL_SPOOF = {                                                                                                                                                    │
+│     MAX_TEXTURE_SIZE: {p.max_texture_size},                                                                                                                              │
+│     MAX_VERTEX_ATTRIBS: 16,                                                                                                                                              │
+│     MAX_VERTEX_UNIFORM_VECTORS: 4096,                                                                                                                                    │
+│     MAX_FRAGMENT_UNIFORM_VECTORS: 1024,                                                                                                                                  │
+│     MAX_VARYING_VECTORS: 30,                                                                                                                                             │
+│     // ... más parámetros                                                                                                                                                │
+│ };                                                                                                                                                                       │
+│                                                                                                                                                                          │
+│ // Extensions spoofing                                                                                                                                                   │
+│ const SPOOFED_EXTENSIONS = [                                                                                                                                             │
+│     'ANGLE_instanced_arrays',                                                                                                                                            │
+│     'EXT_blend_minmax',                                                                                                                                                  │
+│     'EXT_color_buffer_half_float',                                                                                                                                       │
+│     // ... más extensiones                                                                                                                                               │
+│ ];                                                                                                                                                                       │
+│                                                                                                                                                                          │
+│ 3. Navigator Properties Completo                                                                                                                                         │
+│                                                                                                                                                                          │
+│ Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => {p.hardware_concurrency}});                                                                          │
+│ Object.defineProperty(navigator, 'deviceMemory', {get: () => {p.device_memory}});                                                                                        │
+│ Object.defineProperty(navigator, 'platform', {get: () => '{p.platform}'});                                                                                               │
+│ Object.defineProperty(navigator, 'vendor', {get: () => '{p.vendor}'});                                                                                                   │
+│ Object.defineProperty(navigator, 'maxTouchPoints', {get: () => {p.max_touch_points}});                                                                                   │
+│ Object.defineProperty(navigator, 'pdfViewerEnabled', {get: () => true});                                                                                                 │
+│ Object.defineProperty(navigator, 'webkitPersistentStorage', {get: () => ({...})});                                                                                       │
+│                                                                                                                                                                          │
+│ 4. WebRTC Leak Prevention                                                                                                                                                │
+│                                                                                                                                                                          │
+│ // Prevenir WebRTC IP leak                                                                                                                                               │
+│ const originalRTCPeerConnection = window.RTCPeerConnection;                                                                                                              │
+│ window.RTCPeerConnection = function(...args) {                                                                                                                           │
+│     const config = args[0] || {};                                                                                                                                        │
+│     config.iceServers = [];                                                                                                                                              │
+│     return new originalRTCPeerConnection(config);                                                                                                                        │
+│ };                                                                                                                                                                       │
+│                                                                                                                                                                          │
+│ 5. Font Fingerprint Protection                                                                                                                                           │
+│                                                                                                                                                                          │
+│ // Normalizar medidas de fuente                                                                                                                                          │
+│ const originalOffsetWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');                                                                       │
+│ Object.defineProperty(HTMLElement.prototype, 'offsetWidth', {                                                                                                            │
+│     get: function() {                                                                                                                                                    │
+│         const original = originalOffsetWidth.get.call(this);                                                                                                             │
+│         // Añadir pequeña variación consistente                                                                                                                          │
+│         return Math.round(original);                                                                                                                                     │
+│     }                                                                                                                                                                    │
+│ });                                                                                                                                                                      │
+│                                                                                                                                                                          │
+│ Archivo MODIFICAR: grok3api/driver.py                                                                                                                                    │
+│                                                                                                                                                                          │
+│ Cambios necesarios:                                                                                                                                                      │
+│ 1. Importar FingerprintGenerator                                                                                                                                         │
+│ 2. Reemplazar _inject_fingerprint_spoofing() con llamada al nuevo módulo                                                                                                 │
+│ 3. Generar nuevo fingerprint al iniciar sesión                                                                                                                           │
+│ 4. Añadir configuración desde .env                                                                                                                                       │
+│                                                                                                                                                                          │
+│ # En __init__                                                                                                                                                            │
+│ from grok3api.fingerprint import FingerprintGenerator                                                                                                                    │
+│                                                                                                                                                                          │
+│ # En WebDriverSingleton                                                                                                                                                  │
+│ _fingerprint: Optional[FingerprintGenerator] = None                                                                                                                      │
+│                                                                                                                                                                          │
+│ def _inject_fingerprint_spoofing(self):                                                                                                                                  │
+│     """Inject JS via CDP with comprehensive anti-detection."""                                                                                                           │
+│     if self._fingerprint is None:                                                                                                                                        │
+│         self._fingerprint = FingerprintGenerator()                                                                                                                       │
+│                                                                                                                                                                          │
+│     script = self._fingerprint.generate_anti_detection_script()                                                                                                          │
+│     self._driver.execute_cdp_cmd(                                                                                                                                        │
+│         "Page.addScriptToEvaluateOnNewDocument",                                                                                                                         │
+│         {"source": script}                                                                                                                                               │
+│     )                                                                                                                                                                    │
+│                                                                                                                                                                          │
+│ Actualizar .env.example                                                                                                                                                  │
+│                                                                                                                                                                          │
+│ # Fingerprint (opcional - se genera aleatoriamente si no se especifica)                                                                                                  │
+│ # FINGERPRINT_SEED=                                                                                                                                                      │
+│                                                                                                                                                                          │
+│ # Anti-detección avanzada                                                                                                                                                │
+│ ANTI_DETECTION_LEVEL=full  # basic, standard, full                                                                                                                       │
+│                                                                                                                                                                          │
+│ Archivos a Modificar                                                                                                                                                     │
+│                                                                                                                                                                          │
+│ ┌─────────────────────────┬───────────┬───────────────┐                                                                                                                  │
+│ │         Archivo         │  Acción   │ Líneas aprox. │                                                                                                                  │
+│ ├─────────────────────────┼───────────┼───────────────┤                                                                                                                  │
+│ │ grok3api/fingerprint.py │ CREAR     │ ~400 líneas   │                                                                                                                  │
+│ ├─────────────────────────┼───────────┼───────────────┤                                                                                                                  │
+│ │ grok3api/driver.py      │ MODIFICAR │ ~20 líneas    │                                                                                                                  │
+│ ├─────────────────────────┼───────────┼───────────────┤                                                                                                                  │
+│ │ .env.example            │ MODIFICAR │ ~5 líneas     │                                                                                                                  │
+│ └─────────────────────────┴───────────┴───────────────┘                                                                                                                  │
+│                                                                                                                                                                          │
+│ Orden de Implementación                                                                                                                                                  │
+│                                                                                                                                                                          │
+│ 1. Crear grok3api/fingerprint.py con la clase completa                                                                                                                   │
+│ 2. Modificar grok3api/driver.py para usar el nuevo módulo                                                                                                                │
+│ 3. Actualizar .env.example con nuevas opciones                                                                                                                           │
+│ 4. Probar funcionamiento                                                                                                                                                 │
+│                                                                                                                                                                          │
+│ Verificación                                                                                                                                                             │
+│                                                                                                                                                                          │
+│ 1. Ejecutar tests/example.py y verificar que funciona                                                                                                                    │
+│ 2. Verificar en https://browserleaks.com/ que no hay fugas                                                                                                               │
+│ 3. Verificar en https://coveryourtracks.eff.org/                                                                                                                         │
+│ 4. Verificar que el fingerprint es consistente durante una sesión                                                                                                        │
+│ 5. Verificar que cambia entre reinicios                                                                                                                                  │
+│                                                                                                                                                                          │
+│ Consideraciones                                                                                                                                                          │
+│                                                                                                                                                                          │
+│ - El fingerprint debe ser consistente DURANTE una sesión                                                                                                                 │
+│ - El fingerprint debe variar ENTRE sesiones diferentes                                                                                                                   │
+│ - Los valores deben ser realistas (no "perfectos" que delaten automatización)                                                                                            │
+│ - El rendimiento no debe verse afectado significativamente

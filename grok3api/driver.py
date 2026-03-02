@@ -23,12 +23,15 @@ from selenium.webdriver.support import expected_conditions as ec
 from selenium.common.exceptions import SessionNotCreatedException, TimeoutException
 
 from grok3api.logger import logger
+from grok3api.fingerprint import FingerprintGenerator
 
 
 class WebDriverSingleton:
     """Singleton for managing ChromeDriver."""
+
     _instance = None
     _driver: Optional[ChromeWebDriver] = None
+    _fingerprint: Optional[FingerprintGenerator] = None
     TIMEOUT = 360
 
     USE_XVFB = True
@@ -40,6 +43,18 @@ class WebDriverSingleton:
 
     # Proxy desde variable de entorno (DEF_PROXY ya configurado en .env)
     def_proxy = os.getenv("DEF_PROXY", "socks4://98.178.72.21:10919")
+
+    # Anti-detection config desde .env
+    ANTI_DETECTION_LEVEL = os.getenv("ANTI_DETECTION_LEVEL", "full")
+    FINGERPRINT_SEED = os.getenv("FINGERPRINT_SEED")
+
+    # Hardware spoofing config
+    HARDWARE_CONCURRENCY = 8
+    DEVICE_MEMORY = 8
+    PLATFORM = "Win32"
+    VENDOR = "Google Inc."
+    MAX_TOUCH_POINTS = 0
+    MAX_TEXTURE_SIZE = 16384
 
     execute_script = None
     add_cookie = None
@@ -75,7 +90,7 @@ class WebDriverSingleton:
     }
 
     def __new__(cls, *args, **kwargs):
-        if kwargs.get('bypass_singleton'):
+        if kwargs.get("bypass_singleton"):
             return super(WebDriverSingleton, cls).__new__(cls)
         if cls._instance is None:
             cls._instance = super(WebDriverSingleton, cls).__new__(cls)
@@ -94,9 +109,13 @@ class WebDriverSingleton:
     def _hide_unnecessary_logs(self):
         """Suppress noisy third-party logs."""
         try:
-            for name in ("undetected_chromedriver", "selenium",
-                         "urllib3.connectionpool", "selenium.webdriver",
-                         "selenium.webdriver.remote.remote_connection"):
+            for name in (
+                "undetected_chromedriver",
+                "selenium",
+                "urllib3.connectionpool",
+                "selenium.webdriver",
+                "selenium.webdriver.remote.remote_connection",
+            ):
                 lg = logging.getLogger(name)
                 for h in lg.handlers[:]:
                     lg.removeHandler(h)
@@ -108,9 +127,10 @@ class WebDriverSingleton:
 
     def _patch_chrome_del(self):
         """Patch uc.Chrome.__del__ to avoid noisy errors on shutdown."""
+
         def safe_del(self):
             try:
-                if hasattr(self, 'service') and self.service.process:
+                if hasattr(self, "service") and self.service.process:
                     self.service.process.kill()
             except Exception as e:
                 logger.debug(f"Error killing chromedriver service: {e}")
@@ -118,6 +138,7 @@ class WebDriverSingleton:
                 self.quit()
             except Exception as e:
                 logger.debug(f"uc.Chrome.__del__ quit(): {e}")
+
         try:
             uc.Chrome.__del__ = safe_del
         except Exception:
@@ -169,78 +190,36 @@ class WebDriverSingleton:
 
     def _inject_fingerprint_spoofing(self):
         """
-        Inject JS via CDP so it runs on every new document before any page script.
-        Covers: navigator, canvas, WebGL, AudioContext, screen and timezone.
+        Inject JS via CDP with comprehensive anti-detection.
+        Uses FingerprintGenerator for configurable, consistent fingerprint spoofing.
         """
-        script = """
-        // Hide webdriver flag
-        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        if self._fingerprint is None:
+            canvas_seed = None
+            if self.FINGERPRINT_SEED:
+                try:
+                    canvas_seed = int(self.FINGERPRINT_SEED)
+                except ValueError:
+                    pass
 
-        // Canvas fingerprint noise
-        const _origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-        HTMLCanvasElement.prototype.toDataURL = function() {
-            const ctx = this.getContext('2d');
-            if (ctx) {
-                const img = ctx.getImageData(0, 0, this.width, this.height);
-                img.data[0] = img.data[0] ^ 1;
-                ctx.putImageData(img, 0, 0);
-            }
-            return _origToDataURL.apply(this, arguments);
-        };
+            self._fingerprint = FingerprintGenerator(
+                canvas_seed=canvas_seed,
+                anti_detection_level=self.ANTI_DETECTION_LEVEL,
+                hardware_concurrency=self.HARDWARE_CONCURRENCY,
+                device_memory=self.DEVICE_MEMORY,
+                platform=self.PLATFORM,
+                vendor=self.VENDOR,
+                max_touch_points=self.MAX_TOUCH_POINTS,
+                max_texture_size=self.MAX_TEXTURE_SIZE,
+            )
 
-        // WebGL vendor / renderer (WebGL1 + WebGL2)
-        function spoofWebGL(ctx) {
-            const _orig = ctx.prototype.getParameter;
-            ctx.prototype.getParameter = function(parameter) {
-                if (parameter === 37445) return 'Intel Inc.';
-                if (parameter === 37446) return 'Intel Iris OpenGL Engine';
-                return _orig.apply(this, arguments);
-            };
-        }
-        spoofWebGL(WebGLRenderingContext);
-        if (typeof WebGL2RenderingContext !== 'undefined') spoofWebGL(WebGL2RenderingContext);
+        script = self._fingerprint.generate_anti_detection_script()
 
-        // AudioContext fingerprint noise
-        const _origGetChannelData = AudioBuffer.prototype.getChannelData;
-        AudioBuffer.prototype.getChannelData = function() {
-            const data = _origGetChannelData.apply(this, arguments);
-            for (let i = 0; i < data.length; i += 100) {
-                data[i] += Math.random() * 0.0001;
-            }
-            return data;
-        };
-
-        // Screen resolution matching Xvfb 1920x1080
-        Object.defineProperty(screen, 'width',       {get: () => 1920});
-        Object.defineProperty(screen, 'height',      {get: () => 1080});
-        Object.defineProperty(screen, 'availWidth',  {get: () => 1920});
-        Object.defineProperty(screen, 'availHeight', {get: () => 1040});
-
-        // Timezone
-        const _origResolvedOptions = Intl.DateTimeFormat.prototype.resolvedOptions;
-        Intl.DateTimeFormat.prototype.resolvedOptions = function() {
-            return { ..._origResolvedOptions.apply(this, arguments), timeZone: 'America/New_York' };
-        };
-
-        // Realistic plugins list
-        Object.defineProperty(navigator, 'plugins', {get: () => {
-            const arr = [
-                {name: 'Chrome PDF Plugin',  filename: 'internal-pdf-viewer',              description: ''},
-                {name: 'Chrome PDF Viewer',  filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: ''},
-                {name: 'Native Client',      filename: 'internal-nacl-plugin',             description: ''},
-            ];
-            arr.item = i => arr[i];
-            arr.namedItem = n => arr.find(p => p.name === n);
-            arr.refresh = () => {};
-            return arr;
-        }});
-
-        // Consistent language
-        Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-        """
         self._driver.execute_cdp_cmd(
-            "Page.addScriptToEvaluateOnNewDocument",
-            {"source": script}
+            "Page.addScriptToEvaluateOnNewDocument", {"source": script}
+        )
+
+        logger.debug(
+            f"Fingerprint injected. Anti-detection level: {self.ANTI_DETECTION_LEVEL}, Seed: {self._fingerprint.get_seed()}"
         )
 
     # ─────────────────────────────────────────────
@@ -276,13 +255,17 @@ class WebDriverSingleton:
     def _setup_driver(self, driver, wait_loading: bool, timeout: int):
         """Minimise, inject fingerprint, load base URL and wait for input field."""
         self._minimize()
-        self._inject_fingerprint_spoofing()     # must run before driver.get()
+        self._inject_fingerprint_spoofing()  # must run before driver.get()
 
         driver.get(self.BASE_URL)
         patch_fetch_for_statsig(driver)
 
         page = driver.page_source
-        if page and isinstance(page, str) and 'This service is not available in your region' in page:
+        if (
+            page
+            and isinstance(page, str)
+            and "This service is not available in your region" in page
+        ):
             if self.proxy_try > self.max_proxy_tries:
                 raise ValueError("Cannot bypass region block")
             self.need_proxy = True
@@ -295,7 +278,9 @@ class WebDriverSingleton:
             logger.debug("Waiting for input field...")
             try:
                 WebDriverWait(driver, timeout).until(
-                    ec.presence_of_element_located((By.CSS_SELECTOR, "div.relative.z-10 textarea"))
+                    ec.presence_of_element_located(
+                        (By.CSS_SELECTOR, "div.relative.z-10 textarea")
+                    )
                 )
                 self._wait_for_page_stable()
                 self.proxy_try = 0
@@ -303,8 +288,13 @@ class WebDriverSingleton:
             except Exception:
                 logger.debug("Input field not found.")
 
-    def init_driver(self, wait_loading: bool = True, use_xvfb: bool = True,
-                    timeout: Optional[int] = None, proxy: Optional[str] = None):
+    def init_driver(
+        self,
+        wait_loading: bool = True,
+        use_xvfb: bool = True,
+        timeout: Optional[int] = None,
+        proxy: Optional[str] = None,
+    ):
         """Start ChromeDriver and navigate to the base URL (up to 3 attempts)."""
         driver_timeout = timeout if timeout is not None else self.TIMEOUT
         self.TIMEOUT = driver_timeout
@@ -325,10 +315,12 @@ class WebDriverSingleton:
             chrome_options.add_argument("--disable-blink-features=AutomationControlled")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--start-maximized")
-            chrome_options.add_argument(f"--user-agent={random.choice(WebDriverSingleton.USER_AGENTS)}")
+            chrome_options.add_argument(
+                f"--user-agent={random.choice(WebDriverSingleton.USER_AGENTS)}"
+            )
 
             caps = DesiredCapabilities.CHROME
-            caps['goog:loggingPrefs'] = {'browser': 'ALL'}
+            caps["goog:loggingPrefs"] = {"browser": "ALL"}
 
             if proxy:
                 logger.debug(f"Using proxy: {proxy}")
@@ -353,12 +345,16 @@ class WebDriverSingleton:
                     self._minimize()
                     current_url = self._driver.current_url
                     if current_url != self.BASE_URL:
-                        logger.debug(f"Current URL {current_url} differs from base, navigating...")
+                        logger.debug(
+                            f"Current URL {current_url} differs from base, navigating..."
+                        )
                         self._driver.get(self.BASE_URL)
                         if wait_loading:
                             try:
                                 WebDriverWait(self._driver, driver_timeout).until(
-                                    ec.presence_of_element_located((By.CSS_SELECTOR, "div.relative.z-10 textarea"))
+                                    ec.presence_of_element_located(
+                                        (By.CSS_SELECTOR, "div.relative.z-10 textarea")
+                                    )
                                 )
                                 self._wait_for_page_stable()
                                 logger.debug("Input field found.")
@@ -382,8 +378,12 @@ class WebDriverSingleton:
                 self.close_driver()
                 error_message = str(e)
                 match = re.search(r"Current browser version is (\d+)", error_message)
-                self.CHROME_VERSION = int(match.group(1)) if match else self._get_chrome_version()
-                logger.debug(f"Browser/driver mismatch, retrying with Chrome {self.CHROME_VERSION}...")
+                self.CHROME_VERSION = (
+                    int(match.group(1)) if match else self._get_chrome_version()
+                )
+                logger.debug(
+                    f"Browser/driver mismatch, retrying with Chrome {self.CHROME_VERSION}..."
+                )
                 self._driver = _create_driver()
                 self._setup_driver(self._driver, wait_loading, driver_timeout)
                 logger.debug(f"Driver version set to {self.CHROME_VERSION}.")
@@ -399,7 +399,7 @@ class WebDriverSingleton:
                     logger.fatal(f"All {max_attempts} attempts failed: {e}")
                     self.WAS_FATAL = True
                     raise
-                sleep_time = 2 ** attempts      # exponential backoff: 2s, 4s
+                sleep_time = 2**attempts  # exponential backoff: 2s, 4s
                 logger.debug(f"Waiting {sleep_time}s before next attempt...")
                 time.sleep(sleep_time)
 
@@ -408,11 +408,13 @@ class WebDriverSingleton:
         try:
             self._driver.delete_all_cookies()
             self._driver.execute_script("localStorage.clear(); sessionStorage.clear();")
-            self._inject_fingerprint_spoofing()     # re-inject after session reset
+            self._inject_fingerprint_spoofing()  # re-inject after session reset
             self._driver.get(self.BASE_URL)
             patch_fetch_for_statsig(self._driver)
             WebDriverWait(self._driver, self.TIMEOUT).until(
-                ec.presence_of_element_located((By.CSS_SELECTOR, "div.relative.z-10 textarea"))
+                ec.presence_of_element_located(
+                    (By.CSS_SELECTOR, "div.relative.z-10 textarea")
+                )
             )
             self._wait_for_page_stable()
             logger.debug("Session restarted, page loaded.")
@@ -465,7 +467,9 @@ class WebDriverSingleton:
                     c.setdefault("path", "/")
                     self._driver.add_cookie(c)
                 else:
-                    raise ValueError("Each cookie dict must contain 'name' and 'value'.")
+                    raise ValueError(
+                        "Each cookie dict must contain 'name' and 'value'."
+                    )
         else:
             raise TypeError("cookies_input must be a str, dict or list of dicts.")
 
@@ -473,7 +477,9 @@ class WebDriverSingleton:
     # Statsig helpers
     # ─────────────────────────────────────────────
 
-    def get_statsig(self, restart_session: bool = False, try_index: int = 0) -> Optional[str]:
+    def get_statsig(
+        self, restart_session: bool = False, try_index: int = 0
+    ) -> Optional[str]:
         if try_index > 3:
             return None
         try:
@@ -490,7 +496,9 @@ class WebDriverSingleton:
         """Type a random character and submit to trigger a network response."""
         try:
             textarea = WebDriverWait(self._driver, self.TIMEOUT).until(
-                ec.element_to_be_clickable((By.XPATH, "//div[contains(@class, 'relative')]//textarea"))
+                ec.element_to_be_clickable(
+                    (By.XPATH, "//div[contains(@class, 'relative')]//textarea")
+                )
             )
             self.human_move_to(textarea)
             textarea.click()
@@ -527,17 +535,30 @@ class WebDriverSingleton:
 
             WebDriverWait(self._driver, min(self.TIMEOUT, 20)).until(
                 ec.any_of(
-                    ec.presence_of_element_located((By.CSS_SELECTOR, "div.message-bubble p[dir='auto']")),
-                    ec.presence_of_element_located((By.CSS_SELECTOR, "div.w-full.max-w-\\48rem\\]")),
-                    ec.presence_of_element_located((By.XPATH, "//p[contains(text(), \"Making sure you're human...\")]")),
+                    ec.presence_of_element_located(
+                        (By.CSS_SELECTOR, "div.message-bubble p[dir='auto']")
+                    ),
+                    ec.presence_of_element_located(
+                        (By.CSS_SELECTOR, "div.w-full.max-w-\\48rem\\]")
+                    ),
+                    ec.presence_of_element_located(
+                        (
+                            By.XPATH,
+                            '//p[contains(text(), "Making sure you\'re human...")]',
+                        )
+                    ),
                 )
             )
 
-            if self._driver.find_elements(By.CSS_SELECTOR, "div.w-full.max-w-\\48rem\\]"):
+            if self._driver.find_elements(
+                By.CSS_SELECTOR, "div.w-full.max-w-\\48rem\\]"
+            ):
                 logger.debug("Authenticity error.")
                 return None
 
-            if self._driver.find_elements(By.XPATH, "//p[contains(text(), \"Making sure you're human...\")]"):
+            if self._driver.find_elements(
+                By.XPATH, '//p[contains(text(), "Making sure you\'re human...")]'
+            ):
                 logger.debug("Captcha appeared.")
                 return None
 
@@ -580,8 +601,11 @@ class WebDriverSingleton:
         if self.xvfb_display is None:
             display_number = 99
             while True:
-                result = subprocess.run(["pgrep", "-f", f"Xvfb :{display_number}"],
-                                        capture_output=True, text=True)
+                result = subprocess.run(
+                    ["pgrep", "-f", f"Xvfb :{display_number}"],
+                    capture_output=True,
+                    text=True,
+                )
                 if not result.stdout.strip():
                     break
                 display_number += 1
@@ -590,7 +614,9 @@ class WebDriverSingleton:
         display_var = f":{self.xvfb_display}"
         os.environ["DISPLAY"] = display_var
 
-        result = subprocess.run(["pgrep", "-f", f"Xvfb {display_var}"], capture_output=True, text=True)
+        result = subprocess.run(
+            ["pgrep", "-f", f"Xvfb {display_var}"], capture_output=True, text=True
+        )
         if result.stdout.strip():
             logger.debug(f"Xvfb already running on {display_var}.")
             return
@@ -599,11 +625,14 @@ class WebDriverSingleton:
         logger.debug(f"Starting Xvfb on {display_var}...")
         subprocess.Popen(
             ["Xvfb", display_var, "-screen", "0", "1920x1080x24"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
         for _ in range(10):
             time.sleep(1)
-            result = subprocess.run(["pgrep", "-f", f"Xvfb {display_var}"], capture_output=True, text=True)
+            result = subprocess.run(
+                ["pgrep", "-f", f"Xvfb {display_var}"], capture_output=True, text=True
+            )
             if result.stdout.strip():
                 logger.debug(f"Xvfb started on {display_var}.")
                 return
@@ -614,10 +643,15 @@ class WebDriverSingleton:
         if "win" in sys.platform.lower():
             try:
                 import winreg
-                reg_path = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"
+
+                reg_path = (
+                    r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"
+                )
                 with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, reg_path) as key:
                     chrome_path, _ = winreg.QueryValueEx(key, "")
-                output = subprocess.check_output([chrome_path, "--version"], shell=True, text=True)
+                output = subprocess.check_output(
+                    [chrome_path, "--version"], shell=True, text=True
+                )
                 return int(re.search(r"(\d+)\.", output).group(1))
             except Exception as e:
                 logger.debug(f"Registry lookup failed: {e}")
@@ -628,7 +662,9 @@ class WebDriverSingleton:
             ):
                 if os.path.exists(path):
                     try:
-                        output = subprocess.check_output([path, "--version"], shell=True, text=True)
+                        output = subprocess.check_output(
+                            [path, "--version"], shell=True, text=True
+                        )
                         return int(re.search(r"(\d+)\.", output).group(1))
                     except Exception as e:
                         logger.debug(f"Failed at {path}: {e}")
@@ -637,7 +673,9 @@ class WebDriverSingleton:
             return None
         else:
             try:
-                output = subprocess.check_output("google-chrome --version", shell=True, text=True)
+                output = subprocess.check_output(
+                    "google-chrome --version", shell=True, text=True
+                )
                 return int(re.search(r"(\d+)\.", output).group(1))
             except Exception as e:
                 logger.error(f"Error getting Chrome version: {e}")
@@ -653,6 +691,7 @@ class WebDriverSingleton:
 # ─────────────────────────────────────────────
 # Fetch patch (module-level helper, public API unchanged)
 # ─────────────────────────────────────────────
+
 
 def patch_fetch_for_statsig(driver):
     """Intercept fetch calls to capture the x-statsig-id header."""
@@ -685,4 +724,5 @@ def patch_fetch_for_statsig(driver):
 
 
 from grok3api.driver_pool import DriverPool
+
 web_driver = DriverPool(size=int(os.getenv("DRIVER_POOL_SIZE", "3")))

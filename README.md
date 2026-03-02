@@ -1,7 +1,6 @@
 🚀 A Python library for interacting with the Grok 3 API without requiring login or manual cookie input. Perfect for out-of-the-box use.
 
 
-
 ## [➡ Ru ReadMe](docs/Ru/RuReadMe.md)
 
 # 🤖 Grok3API: Client for Working with Grok
@@ -246,8 +245,6 @@ You can now control the infrastructure without touching the code. Add these to y
 - **SIGTERM Support**: Clean exit handling for server environments.
 
 ---
-
-If something’s unclear, feel free to raise an issue — we’ll figure it out together! 🌟
 
 ## Disclaimer
 Grok3API has no affiliation with xAI or the Grok developers. It is an independent project created by a third party and is not supported, sponsored or endorsed by xAI. Any issues with Grok should be addressed directly to xAI.
